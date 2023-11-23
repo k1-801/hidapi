@@ -174,19 +174,19 @@ err:
 #endif /* HIDAPI_USE_DDK */
 
 struct hid_device_ {
-		HANDLE device_handle;
-		BOOL blocking;
-		USHORT output_report_length;
-		unsigned char *write_buf;
-		size_t input_report_length;
-		USHORT feature_report_length;
-		unsigned char *feature_buf;
-		wchar_t *last_error_str;
-		BOOL read_pending;
-		char *read_buf;
-		OVERLAPPED ol;
-		OVERLAPPED write_ol;
-		struct hid_device_info* device_info;
+	HANDLE device_handle;
+	BOOL blocking;
+	USHORT output_report_length;
+	unsigned char *write_buf;
+	size_t input_report_length;
+	USHORT feature_report_length;
+	unsigned char *feature_buf;
+	wchar_t *last_error_str;
+	BOOL read_pending;
+	char *read_buf;
+	OVERLAPPED ol;
+	OVERLAPPED write_ol;
+	struct hid_device_info* device_info;
 };
 
 static struct hid_hotplug_context {
@@ -381,15 +381,20 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+static void hid_internal_hotplug_init()
+{
+	if (!hid_hotplug_context.mutex) {
+		hid_hotplug_context.mutex = CreateMutexW(NULL, FALSE, NULL);
+		if(!hid_hotplug_context.mutex) {
+			register_global_error(L"Failed to create hotplug management mutex");
+		}
+	}
+}
+
 int HID_API_EXPORT hid_init(void)
 {
-    register_global_error(NULL);
-    if (!hid_hotplug_context.mutex) {
-        hid_hotplug_context.mutex = CreateMutexA(NULL, FALSE, NULL);
-        if(!hid_hotplug_context.mutex) {
-            register_global_error(L"Failed to create hotplug management mutex");
-        }
-    }
+	register_global_error(NULL);
+
 #ifndef HIDAPI_USE_DDK
 	if (!hidapi_initialized) {
 		if (lookup_functions() < 0) {
@@ -399,10 +404,13 @@ int HID_API_EXPORT hid_init(void)
 		hidapi_initialized = TRUE;
 	}
 #endif
+
+	hid_internal_hotplug_init();
+
 	return 0;
 }
 
-static void hid_internal_cleanup_hotplugs()
+static void hid_internal_hotplug_cleanup()
 {
     /* Unregister a HID device connection notification when removing the last callback */
     /* This function is always called inside a locked mutex */
@@ -415,7 +423,7 @@ static void hid_internal_cleanup_hotplugs()
 
         if (hid_hotplug_context.notify_handle) {
             if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-                register_global_error(L"hid_hotplug_deregister_callback/CM_Unregister_Notification");
+				register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
                 return;
             }
         }
@@ -424,17 +432,24 @@ static void hid_internal_cleanup_hotplugs()
     }
 }
 
+static void hid_internal_hotplug_exit()
+{
+	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	hid_internal_hotplug_cleanup();
+	ReleaseMutex(hid_hotplug_context.mutex);
+	CloseHandle(hid_hotplug_context.mutex);
+}
+
 int HID_API_EXPORT hid_exit(void)
 {
 #ifndef HIDAPI_USE_DDK
 	free_library_handles();
 	hidapi_initialized = FALSE;
 #endif
-    WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
-    hid_internal_cleanup_hotplugs();
-    ReleaseMutex(hid_hotplug_context.mutex);
-    CloseHandle(hid_hotplug_context.mutex);
 	register_global_error(NULL);
+
+	hid_internal_hotplug_exit();
+
 	return 0;
 }
 
@@ -952,14 +967,18 @@ struct hid_hotplug_callback {
 	struct hid_hotplug_callback *next;
 };
 
-DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA event_data, DWORD event_data_size)
+DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
+										  PVOID context,
+										  CM_NOTIFY_ACTION action,
+										  PCM_NOTIFY_EVENT_DATA event_data,
+										  DWORD event_data_size)
 {
-	struct hid_device_info* device = NULL;
+	struct hid_device_info *device = NULL;
 	hid_hotplug_event hotplug_event = 0;
 
-	(void)notify;
-	(void)context;
-	(void)event_data_size;
+	(void) notify;
+	(void) context;
+	(void) event_data_size;
 
 	if (event_data == NULL || event_data->FilterType != CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE) {
 		return ERROR_SUCCESS;
@@ -982,24 +1001,23 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 			return ERROR_SUCCESS;
 		}
 
-		device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
+		device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink,
+											  read_handle);
 
 		/* Append to the end of the device list */
 		if (hid_hotplug_context.devs != NULL) {
-			struct hid_device_info* last = hid_hotplug_context.devs;
+			struct hid_device_info *last = hid_hotplug_context.devs;
 			while (last->next != NULL) {
 				last = last->next;
 			}
 			last->next = device;
-		}
-		else {
+		} else {
 			hid_hotplug_context.devs = device;
 		}
 
 		CloseHandle(read_handle);
-	}
-	else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
-		char* path;
+	} else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
+		char *path;
 
 		hotplug_event = HID_API_HOTPLUG_EVENT_DEVICE_LEFT;
 
@@ -1010,10 +1028,11 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		}
 
 		/* Get and remove this device from the device list */
-		for (struct hid_device_info** current = &hid_hotplug_context.devs; *current; current = &(*current)->next) {
+		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;
+			 current = &(*current)->next) {
 			/* Case-independent path comparison is mandatory */
 			if (_stricmp((*current)->path, path) == 0) {
-				struct hid_device_info* next = (*current)->next;
+				struct hid_device_info *next = (*current)->next;
 				device = *current;
 				*current = next;
 				break;
@@ -1028,12 +1047,18 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 		while (*current) {
 			struct hid_hotplug_callback *callback = *current;
-            if ((callback->events & hotplug_event) &&
-				hid_internal_match_device_id(device->vendor_id, device->product_id, callback->vendor_id, callback->product_id)) {
-                int result = (callback->callback)(callback->handle, device, hotplug_event, callback->user_data);
+			if ((callback->events & hotplug_event)
+				&& hid_internal_match_device_id(device->vendor_id,
+												device->product_id,
+												callback->vendor_id,
+												callback->product_id)) {
+				int result = (callback->callback)(callback->handle,
+												  device,
+												  hotplug_event,
+												  callback->user_data);
 				/* If the result is non-zero, we remove the callback and proceed */
 				/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
-				if(result) {
+				if (result) {
 					struct hid_hotplug_callback *callback = *current;
 					*current = (*current)->next;
 					free(callback);
@@ -1154,8 +1179,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	struct hid_hotplug_callback *hotplug_cb = NULL;
-
 	if (callback_handle <= 0 || hid_hotplug_context.hotplug_cbs == NULL) {
 		return -1;
 	}
@@ -1167,16 +1190,15 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
 			struct hid_hotplug_callback *next = (*current)->next;
-			hotplug_cb = *current;
 			*current = next;
-			free(hotplug_cb);
+			free(*current);
 			break;
 		}
 	}
 
-	ReleaseMutex(hid_hotplug_context.mutex);
+	hid_internal_hotplug_cleanup();
 
-	hid_internal_cleanup_hotplugs();
+	ReleaseMutex(hid_hotplug_context.mutex);
 
 	return 0;
 }
