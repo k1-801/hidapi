@@ -412,24 +412,25 @@ int HID_API_EXPORT hid_init(void)
 
 static void hid_internal_hotplug_cleanup()
 {
-    /* Unregister a HID device connection notification when removing the last callback */
-    /* This function is always called inside a locked mutex */
-    if (hid_hotplug_context.hotplug_cbs == NULL) {
-        if(hid_hotplug_context.devs) {
-            /* Cleanup connected device list */
-            hid_free_enumeration(hid_hotplug_context.devs);
-            hid_hotplug_context.devs = NULL;
-        }
+	/* Unregister a HID device connection notification when removing the last callback */
+	/* This function is always called inside a locked mutex */
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		if (hid_hotplug_context.devs) {
+			/* Cleanup connected device list */
+			hid_free_enumeration(hid_hotplug_context.devs);
+			hid_hotplug_context.devs = NULL;
+		}
 
-        if (hid_hotplug_context.notify_handle) {
-            if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-				register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
-                return;
-            }
-        }
+		if (hid_hotplug_context.notify_handle) {
+			if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
+				register_global_error(
+					L"CM_Unregister_Notification failed for Hotplug notification");
+				return;
+			}
+		}
 
-        hid_hotplug_context.notify_handle = NULL;
-    }
+		hid_hotplug_context.notify_handle = NULL;
+	}
 }
 
 static void hid_internal_hotplug_exit()
