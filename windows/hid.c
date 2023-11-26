@@ -436,6 +436,14 @@ static void hid_internal_hotplug_cleanup()
 static void hid_internal_hotplug_exit()
 {
 	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	/* Reove all callbacks from the list */
+	while(*current)
+	{
+		hid_hotplug_callback* next = (*current)->next;
+		free(*current);
+		*current = next;
+	}
 	hid_internal_hotplug_cleanup();
 	ReleaseMutex(hid_hotplug_context.mutex);
 	CloseHandle(hid_hotplug_context.mutex);
