@@ -206,7 +206,7 @@ static struct hid_hotplug_context {
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.notify_handle = NULL,
-    .mutex = NULL,
+	.mutex = NULL,
 	.next_handle = 1,
 	.hotplug_cbs = NULL,
 	.devs = NULL
@@ -437,7 +437,7 @@ static void hid_internal_hotplug_exit()
 {
 	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
 	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
-	/* Reove all callbacks from the list */
+	/* Remove all callbacks from the list */
 	while(*current)
 	{
 		hid_hotplug_callback* next = (*current)->next;
