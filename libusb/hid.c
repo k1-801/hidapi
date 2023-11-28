@@ -17,7 +17,7 @@
  files located at the root of the source distribution.
  These files may also be found in the public source
  code repository located at:
-		https://github.com/libusb/hidapi .
+        https://github.com/libusb/hidapi .
 ********************************************************/
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
@@ -556,6 +556,38 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+static void hid_internal_cleanup_hotplugs()
+{
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		/* Cleanup connected device list */
+		hid_free_enumeration(hid_hotplug_context.devs);
+		hid_hotplug_context.devs = NULL;
+		/* Disarm the libusb listener */
+		libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
+	}
+}
+
+static void hid_internal_hotplug_init()
+{
+	pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+}
+
+static void hid_internal_hotplug_exit()
+{
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	/* Remove all callbacks from the list */
+	while(*current)
+	{
+		hid_hotplug_callback* next = (*current)->next;
+		free(*current);
+		*current = next;
+	}
+	hid_internal_hotplug_cleanup();
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_mutex_destroy(&hid_hotplug_context.mutex);
+}
+
 int HID_API_EXPORT hid_init(void)
 {
 	if (!usb_context) {
@@ -570,7 +602,7 @@ int HID_API_EXPORT hid_init(void)
 		if (!locale)
 			setlocale(LC_CTYPE, "");
 
-		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		hid_internal_hotplug_exit();
 	}
 
 	return 0;
@@ -955,17 +987,6 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 	}
 }
 
-static void hid_internal_cleanup_hotplugs()
-{
-	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		/* Cleanup connected device list */
-		hid_free_enumeration(hid_hotplug_context.devs);
-		hid_hotplug_context.devs = NULL;
-		/* Disarm the libusb listener */
-		libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
-	}
-}
-
 static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
 {
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
@@ -1011,7 +1032,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	}
 
 	/* Clean up if the last callback was removed */
-	hid_internal_cleanup_hotplugs();
+	hid_internal_hotplug_cleanup();
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	return 0;
@@ -1127,7 +1148,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 		}
 	}
 
-	hid_internal_cleanup_hotplugs();
+	hid_internal_hotplug_cleanup();
 
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
