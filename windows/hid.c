@@ -414,23 +414,25 @@ static void hid_internal_hotplug_cleanup()
 {
 	/* Unregister a HID device connection notification when removing the last callback */
 	/* This function is always called inside a locked mutex */
-	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		if (hid_hotplug_context.devs) {
-			/* Cleanup connected device list */
-			hid_free_enumeration(hid_hotplug_context.devs);
-			hid_hotplug_context.devs = NULL;
-		}
-
-		if (hid_hotplug_context.notify_handle) {
-			if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-				register_global_error(
-					L"CM_Unregister_Notification failed for Hotplug notification");
-				return;
-			}
-		}
-
-		hid_hotplug_context.notify_handle = NULL;
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		return;
 	}
+
+	if (hid_hotplug_context.devs) {
+		/* Cleanup connected device list */
+		hid_free_enumeration(hid_hotplug_context.devs);
+		hid_hotplug_context.devs = NULL;
+	}
+
+	if (hid_hotplug_context.notify_handle) {
+		if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
+			register_global_error(
+				L"CM_Unregister_Notification failed for Hotplug notification");
+			return;
+		}
+	}
+
+	hid_hotplug_context.notify_handle = NULL;
 }
 
 struct hid_hotplug_callback {
@@ -985,9 +987,9 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 	struct hid_device_info *device = NULL;
 	hid_hotplug_event hotplug_event = 0;
 
-	(void) notify;
-	(void) context;
-	(void) event_data_size;
+	(void)notify;
+	(void)context;
+	(void)event_data_size;
 
 	if (event_data == NULL || event_data->FilterType != CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE) {
 		return ERROR_SUCCESS;
@@ -1010,8 +1012,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 			return ERROR_SUCCESS;
 		}
 
-		device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink,
-											  read_handle);
+		device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
 
 		/* Append to the end of the device list */
 		if (hid_hotplug_context.devs != NULL) {
@@ -1056,15 +1057,8 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 		struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 		while (*current) {
 			struct hid_hotplug_callback *callback = *current;
-			if ((callback->events & hotplug_event)
-				&& hid_internal_match_device_id(device->vendor_id,
-												device->product_id,
-												callback->vendor_id,
-												callback->product_id)) {
-				int result = (callback->callback)(callback->handle,
-												  device,
-												  hotplug_event,
-												  callback->user_data);
+			if ((callback->events & hotplug_event) && hid_internal_match_device_id(device->vendor_id, device->product_id, callback->vendor_id, callback->product_id)) {
+				int result = (callback->callback)(callback->handle, device, hotplug_event, callback->user_data);
 				/* If the result is non-zero, we remove the callback and proceed */
 				/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
 				if (result) {
