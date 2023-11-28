@@ -433,14 +433,26 @@ static void hid_internal_hotplug_cleanup()
 	}
 }
 
+struct hid_hotplug_callback {
+	hid_hotplug_callback_handle handle;
+	unsigned short vendor_id;
+	unsigned short product_id;
+	hid_hotplug_event events;
+	void *user_data;
+	hid_hotplug_callback_fn callback;
+
+	/* Pointer to the next notification */
+	struct hid_hotplug_callback *next;
+};
+
 static void hid_internal_hotplug_exit()
 {
 	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
-	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	struct hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while(*current)
 	{
-		hid_hotplug_callback* next = (*current)->next;
+		struct hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
@@ -963,18 +975,6 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 		d = next;
 	}
 }
-
-struct hid_hotplug_callback {
-	hid_hotplug_callback_handle handle;
-	unsigned short vendor_id;
-	unsigned short product_id;
-	hid_hotplug_event events;
-	void *user_data;
-	hid_hotplug_callback_fn callback;
-
-	/* Pointer to the next notification */
-	struct hid_hotplug_callback *next;
-};
 
 DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 										  PVOID context,
