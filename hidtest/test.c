@@ -131,6 +131,9 @@ int device_callback(
     printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
     printf("\n");
 
+	/* Printed data might not show on the screen - force it out */
+	fflush(stdout);
+
     //if (device->product_id == 0x0ce6)
     //    return 1;
 
