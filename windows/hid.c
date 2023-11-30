@@ -385,7 +385,7 @@ static void hid_internal_hotplug_init()
 {
 	if (!hid_hotplug_context.mutex) {
 		hid_hotplug_context.mutex = CreateMutexW(NULL, FALSE, NULL);
-		if(!hid_hotplug_context.mutex) {
+		if (!hid_hotplug_context.mutex) {
 			register_global_error(L"Failed to create hotplug management mutex");
 		}
 	}
