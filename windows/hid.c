@@ -452,8 +452,7 @@ static void hid_internal_hotplug_exit()
 	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
 	struct hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
-	while(*current)
-	{
+	while (*current) {
 		struct hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
