@@ -428,9 +428,8 @@ static void hid_internal_hotplug_cleanup()
 
 	if (hid_hotplug_context.notify_handle) {
 		if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-			register_global_error(
-				L"CM_Unregister_Notification failed for Hotplug notification");
-			return;
+			/* We mark an error, but we proceed with the cleanup */
+			register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
 		}
 	}
 
@@ -451,7 +450,7 @@ struct hid_hotplug_callback {
 
 static void hid_internal_hotplug_exit()
 {
-	if(!hid_hotplug_context.critical_section_ready) {
+	if (!hid_hotplug_context.critical_section_ready) {
 		/* If the critical section is not initialized, we are safe to assume nothing else is */
 		return;
 	}
@@ -1198,7 +1197,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
-	if(!hid_hotplug_context.hotplug_cbs) {
+	if (!hid_hotplug_context.hotplug_cbs) {
 		LeaveCriticalSection(&hid_hotplug_context.critical_section);
 		return -1;
 	}
