@@ -202,6 +202,8 @@ static struct hid_hotplug_context {
 
 	pthread_mutex_t mutex;
 
+	int mutex_ready;
+
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
 
@@ -209,6 +211,7 @@ static struct hid_hotplug_context {
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.next_handle = 1,
+	.mutex_ready = 0,
 	.hotplug_cbs = NULL,
 	.devs = NULL
 };
@@ -556,35 +559,43 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
-static void hid_internal_cleanup_hotplugs()
+static void hid_internal_hotplug_cleanup()
 {
-	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		/* Cleanup connected device list */
-		hid_free_enumeration(hid_hotplug_context.devs);
-		hid_hotplug_context.devs = NULL;
-		/* Disarm the libusb listener */
-		libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		return;
 	}
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+	/* Disarm the libusb listener */
+	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
 }
 
 static void hid_internal_hotplug_init()
 {
-	pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+	if (!hid_hotplug_context.mutex_ready) {
+		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		hid_hotplug_context.mutex_ready = 1;
+	}
 }
 
 static void hid_internal_hotplug_exit()
 {
+	if (!hid_hotplug_context.mutex_ready) {
+		return;
+	}
+
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
 	/* Remove all callbacks from the list */
-	while(*current)
-	{
+	while (*current) {
 		hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
 	hid_internal_hotplug_cleanup();
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	hid_hotplug_context.mutex_ready = 0;
 	pthread_mutex_destroy(&hid_hotplug_context.mutex);
 }
 
@@ -601,8 +612,6 @@ int HID_API_EXPORT hid_init(void)
 		locale = setlocale(LC_CTYPE, NULL);
 		if (!locale)
 			setlocale(LC_CTYPE, "");
-
-		hid_internal_hotplug_exit();
 	}
 
 	return 0;
@@ -613,7 +622,7 @@ int HID_API_EXPORT hid_exit(void)
 	if (usb_context) {
 		libusb_exit(usb_context);
 		usb_context = NULL;
-		pthread_mutex_destroy(&hid_hotplug_context.mutex);
+		hid_internal_hotplug_exit();
 	}
 
 	return 0;
@@ -900,7 +909,7 @@ struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, u
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	num_devs = libusb_get_device_list(usb_context, &devs);
@@ -969,14 +978,13 @@ static int match_libusb_to_info(libusb_device *device, struct hid_device_info* i
 static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotplug_event event)
 {
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
-	while(*current) {
+	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
-		if((callback->events & event) &&
-			hid_internal_match_device_id(info->vendor_id, info->product_id, callback->vendor_id, callback->product_id)) {
+		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id, callback->vendor_id, callback->product_id)) {
 			int result = callback->callback(callback->handle, info, event, callback->user_data);
 			/* If the result is non-zero, we remove the callback and proceed */
 			/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
-			if(result) {
+			if (result) {
 				struct hid_hotplug_callback *callback = *current;
 				*current = (*current)->next;
 				free(callback);
@@ -990,11 +998,10 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
 {
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	if(event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED)
-	{
+	if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
 		struct hid_device_info* info = hid_enumerate_from_libusb(device, 0, 0);
 		struct hid_device_info* info_cur = info;
-		while(info_cur) {
+		while (info_cur) {
 			/* For each device, call all matching callbacks */
 			/* TODO: possibly make the `next` field NULL to match the behavior on other systems */
 			hid_internal_invoke_callbacks(info_cur, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED);
@@ -1002,7 +1009,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 		}
 
 		/* Append all we got to the end of the device list */
-		if(info) {
+		if (info) {
 			if (hid_hotplug_context.devs != NULL) {
 				struct hid_device_info* last = hid_hotplug_context.devs;
 				while (last->next != NULL) {
@@ -1015,7 +1022,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 			}
 		}
 	}
-	else if(event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
+	else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
 		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;) {
 			struct hid_device_info* info = *current;
 			if (match_libusb_to_info(device, *current)) {
@@ -1040,7 +1047,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle)
 {
-	if(!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
+	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
 		return -1;
 	}
 
@@ -1066,8 +1073,12 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hotplug_cb->user_data = user_data;
 	hotplug_cb->callback = callback;
 
-	/* The initialization from here may be not thread-safe, so we lock the mutex */
+	/* Ensure we are ready to actually use the mutex */
+	hid_internal_hotplug_init();
+
+	/* Lock the mutex to avoid race conditions */
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
 	/* handle the unlikely case of handle overflow */
@@ -1126,7 +1137,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 {
 	struct hid_hotplug_callback *hotplug_cb = NULL;
 
-	if(!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG) || callback_handle <= 0) {
+	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG) || !hid_hotplug_context.mutex_ready || callback_handle <= 0) {
 		return -1;
 	}
 
