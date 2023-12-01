@@ -414,7 +414,7 @@ int HID_API_EXPORT hid_init(void)
 
 static void hid_internal_hotplug_cleanup()
 {
-	/* Unregister a HID device connection notification when removing the last callback */
+	/* Unregister the HID device connection notification when removing the last callback */
 	/* This function is always called inside a locked mutex */
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
 		return;
@@ -451,8 +451,10 @@ struct hid_hotplug_callback {
 
 static void hid_internal_hotplug_exit()
 {
-	/* Only ensures the validity of the critical section */
-	hid_internal_hotplug_init();
+	if(!hid_hotplug_context.critical_section_ready) {
+		/* If the critical section is not initialized, we are safe to assume nothing else is */
+		return;
+	}
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 	struct hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
