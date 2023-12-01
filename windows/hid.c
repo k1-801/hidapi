@@ -69,6 +69,10 @@ typedef LONG NTSTATUS;
 /* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
 #define MAX_STRING_WCHARS 256
 
+/* The value of the first callback handle to be given upon registration */
+/* Can be any arbitrary positive integer */
+#define FIRST_HOTPLUG_CALLBACK_HANDLE 1
+
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
 	.minor = HID_API_VERSION_MINOR,
@@ -193,8 +197,10 @@ static struct hid_hotplug_context {
 	/* Win32 notification handle */
 	HCMNOTIFICATION notify_handle;
 
-	/* Win32 mutex handle, for both cached device list and callback list changes */
-	HANDLE mutex;
+	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
+	CRITICAL_SECTION critical_section;
+
+	int critical_section_ready;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -206,8 +212,8 @@ static struct hid_hotplug_context {
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.notify_handle = NULL,
-	.mutex = NULL,
-	.next_handle = 1,
+	.critical_section_ready = 0,
+	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
 	.hotplug_cbs = NULL,
 	.devs = NULL
 };
@@ -383,11 +389,9 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 static void hid_internal_hotplug_init()
 {
-	if (!hid_hotplug_context.mutex) {
-		hid_hotplug_context.mutex = CreateMutexW(NULL, FALSE, NULL);
-		if (!hid_hotplug_context.mutex) {
-			register_global_error(L"Failed to create hotplug management mutex");
-		}
+	if (!hid_hotplug_context.critical_section_ready) {
+		InitializeCriticalSection(&hid_hotplug_context.critical_section);
+		hid_hotplug_context.critical_section_ready = 1;
 	}
 }
 
@@ -404,8 +408,6 @@ int HID_API_EXPORT hid_init(void)
 		hidapi_initialized = TRUE;
 	}
 #endif
-
-	hid_internal_hotplug_init();
 
 	return 0;
 }
@@ -449,7 +451,9 @@ struct hid_hotplug_callback {
 
 static void hid_internal_hotplug_exit()
 {
-	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	/* Only ensures the validity of the critical section */
+	hid_internal_hotplug_init();
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
 	struct hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
@@ -458,8 +462,9 @@ static void hid_internal_hotplug_exit()
 		*current = next;
 	}
 	hid_internal_hotplug_cleanup();
-	ReleaseMutex(hid_hotplug_context.mutex);
-	CloseHandle(hid_hotplug_context.mutex);
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+	hid_hotplug_context.critical_section_ready = 0;
+	DeleteCriticalSection(&hid_hotplug_context.critical_section);
 }
 
 int HID_API_EXPORT hid_exit(void)
@@ -995,7 +1000,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 	}
 
 	/* Lock the mutex to avoid race conditions */
-	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
 	if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
 		HANDLE read_handle;
@@ -1076,7 +1081,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 		}
 	}
 
-	ReleaseMutex(hid_hotplug_context.mutex);
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return ERROR_SUCCESS;
 }
@@ -1107,8 +1112,11 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hotplug_cb->user_data = user_data;
 	hotplug_cb->callback = callback;
 
+	/* Ensure we are ready to actually use the mutex */
+	hid_internal_hotplug_init();
+
 	/* Lock the mutex to avoid race conditions */
-	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
@@ -1142,7 +1150,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 		if (hid_hotplug_context.notify_handle != NULL) {
 			register_global_error(L"Device notification have already been registered");
-			ReleaseMutex(hid_hotplug_context.mutex);
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
 			return -1;
 		}
 
@@ -1157,7 +1165,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		/* Register for a HID device notification when adding the first callback */
 		if (CM_Register_Notification(&notify_filter, NULL, hid_internal_notify_callback, &hid_hotplug_context.notify_handle) != CR_SUCCESS) {
 			register_global_error(L"hid_hotplug_register_callback/CM_Register_Notification");
-			ReleaseMutex(hid_hotplug_context.mutex);
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
 			return -1;
 		}
 	}
@@ -1174,19 +1182,19 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	ReleaseMutex(hid_hotplug_context.mutex);
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	if (callback_handle <= 0 || hid_hotplug_context.hotplug_cbs == NULL) {
+	if (callback_handle <= 0 || hid_hotplug_context.hotplug_cbs == NULL || !hid_hotplug_context.critical_section_ready) {
 		return -1;
 	}
 
 	/* Lock the mutex to avoid race conditions */
-	WaitForSingleObject(hid_hotplug_context.mutex, INFINITE);
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
@@ -1200,7 +1208,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	hid_internal_hotplug_cleanup();
 
-	ReleaseMutex(hid_hotplug_context.mutex);
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
 }
