@@ -51,6 +51,10 @@
 
 #include "hidapi_libusb.h"
 
+/* The value of the first callback handle to be given upon registration */
+/* Can be any arbitrary positive integer */
+#define FIRST_HOTPLUG_CALLBACK_HANDLE 1
+
 #if defined(__ANDROID__) && __ANDROID_API__ < __ANDROID_API_N__
 
 /* Barrier implementation because Android/Bionic don't have pthread_barrier.
@@ -66,15 +70,15 @@ typedef struct pthread_barrier {
 
 static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
 {
-	if(count == 0) {
+	if (count == 0) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	if(pthread_mutex_init(&barrier->mutex, 0) < 0) {
+	if (pthread_mutex_init(&barrier->mutex, 0) < 0) {
 		return -1;
 	}
-	if(pthread_cond_init(&barrier->cond, 0) < 0) {
+	if (pthread_cond_init(&barrier->cond, 0) < 0) {
 		pthread_mutex_destroy(&barrier->mutex);
 		return -1;
 	}
@@ -95,7 +99,7 @@ static int pthread_barrier_wait(pthread_barrier_t *barrier)
 {
 	pthread_mutex_lock(&barrier->mutex);
 	++(barrier->count);
-	if(barrier->count >= barrier->trip_count)
+	if (barrier->count >= barrier->trip_count)
 	{
 		barrier->count = 0;
 		pthread_cond_broadcast(&barrier->cond);
@@ -210,7 +214,7 @@ static struct hid_hotplug_context {
 	/* Linked list of the device infos (mandatory when the device is disconnected) */
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
-	.next_handle = 1,
+	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
 	.mutex_ready = 0,
 	.hotplug_cbs = NULL,
 	.devs = NULL
@@ -918,7 +922,7 @@ struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, u
 
 	while ((dev = devs[i++]) != NULL) {
 		struct hid_device_info *tmp = hid_enumerate_from_libusb(dev, vendor_id, product_id);
-		if(cur_dev){
+		if (cur_dev) {
 			cur_dev->next = tmp;
 		}
 		else {
@@ -926,8 +930,8 @@ struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, u
 			cur_dev = tmp;
 		}
 		/* Traverse to the end of newly attached tail */
-		if(cur_dev) {
-			while(cur_dev->next){
+		if (cur_dev) {
+			while (cur_dev->next) {
 				cur_dev = cur_dev->next;
 			}
 		}
@@ -1109,7 +1113,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 													  LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 													  0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_CLASS_HID, &hid_libusb_hotplug_callback, NULL,
 													  &hid_hotplug_context.callback_handle);
-		if(result) {
+		if (result) {
 			/* Major failure */
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
@@ -1292,10 +1296,10 @@ static void *read_thread(void *param)
 	/* Make the first submission. Further submissions are made
 	   from inside read_callback() */
 	res = libusb_submit_transfer(dev->transfer);
-	if(res < 0) {
-				LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
-				dev->shutdown_thread = 1;
-				dev->transfer_loop_finished = 1;
+	if (res < 0) {
+		LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+		dev->shutdown_thread = 1;
+		dev->transfer_loop_finished = 1;
 	}
 
 	/* Notify the main thread that the read thread is up and running. */
@@ -1449,7 +1453,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	int d = 0;
 	int good_open = 0;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	dev = new_hid_device();
@@ -1511,7 +1515,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	int res = 0;
 	int j = 0, k = 0;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	dev = new_hid_device();
