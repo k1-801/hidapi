@@ -1191,12 +1191,17 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	if (callback_handle <= 0 || hid_hotplug_context.hotplug_cbs == NULL || !hid_hotplug_context.critical_section_ready) {
+	if (callback_handle <= 0 || !hid_hotplug_context.critical_section_ready) {
 		return -1;
 	}
 
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
+
+	if(!hid_hotplug_context.hotplug_cbs) {
+		LeaveCriticalSection(&hid_hotplug_context.critical_section);
+		return -1;
+	}
 
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
