@@ -563,6 +563,18 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+struct hid_hotplug_callback
+{
+	unsigned short vendor_id;
+	unsigned short product_id;
+	hid_hotplug_callback_fn callback;
+	void* user_data;
+	int events;
+	struct hid_hotplug_callback* next;
+
+	hid_hotplug_callback_handle handle;
+};
+
 static void hid_internal_hotplug_cleanup()
 {
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
@@ -590,10 +602,10 @@ static void hid_internal_hotplug_exit()
 	}
 
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
-		hid_hotplug_callback* next = (*current)->next;
+		struct hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
@@ -955,18 +967,6 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 		d = next;
 	}
 }
-
-struct hid_hotplug_callback
-{
-	unsigned short vendor_id;
-	unsigned short product_id;
-	hid_hotplug_callback_fn callback;
-	void* user_data;
-	int events;
-	struct hid_hotplug_callback* next;
-
-	hid_hotplug_callback_handle handle;
-};
 
 static int match_libusb_to_info(libusb_device *device, struct hid_device_info* info)
 {
