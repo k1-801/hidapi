@@ -918,7 +918,6 @@ struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, u
 {
 	libusb_device **devs;
 	libusb_device *dev;
-	libusb_device_handle *handle = NULL;
 	ssize_t num_devs;
 	int i = 0;
 
@@ -1001,6 +1000,9 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 
 static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
 {
+	(void)ctx;
+	(void)user_data;
+
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
 		struct hid_device_info* info = hid_enumerate_from_libusb(device, 0, 0);
