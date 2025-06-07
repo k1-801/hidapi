@@ -92,10 +92,15 @@ if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
 endif()
 
+option(HIDAPI_BUILD_HIDTEST_INTERACTIVE "Build small interactive console test application hidtest_interactive" ${IS_DEBUG_BUILD})
+if(HIDAPI_BUILD_HIDTEST_INTERACTIVE)
+    add_subdirectory(hidtest_interactive)
+endif()
+
 if(HIDAPI_ENABLE_ASAN)
     if(NOT MSVC)
         # MSVC doesn't recognize those options, other compilers - requiring it
-        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest)
+        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest hidtest_interactive)
             if(TARGET ${HIDAPI_TARGET})
                 if(BUILD_SHARED_LIBS)
                     target_link_options(${HIDAPI_TARGET} PRIVATE -fsanitize=address)
