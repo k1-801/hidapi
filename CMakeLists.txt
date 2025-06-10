@@ -92,6 +92,11 @@ if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
 endif()
 
+option(HIDAPI_BUILD_HIDTEST_HOTPLUG "Build small console test application hidtest_hotplug" ${IS_DEBUG_BUILD})
+if(HIDAPI_BUILD_HIDTEST_HOTPLUG)
+    add_subdirectory(hidtest_hotplug)
+endif()
+
 option(HIDAPI_BUILD_HIDTEST_INTERACTIVE "Build small interactive console test application hidtest_interactive" ${IS_DEBUG_BUILD})
 if(HIDAPI_BUILD_HIDTEST_INTERACTIVE)
     add_subdirectory(hidtest_interactive)
